@@ -11,6 +11,7 @@
  */
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -23,6 +24,8 @@ namespace HtmlToOpenXml
     using a = DocumentFormat.OpenXml.Drawing;
     using pic = DocumentFormat.OpenXml.Drawing.Pictures;
     using wp = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+	using a14 = DocumentFormat.OpenXml.Office2010.Drawing;
+	using asvg = DocumentFormat.OpenXml.Drawing.Pictures.SVG;
 
 
 
@@ -494,11 +497,12 @@ namespace HtmlToOpenXml
 			// Cache all the ImagePart processed to avoid downloading the same image.
 			CachedImagePart imagePart = null;
 
+			HtmlImageInfo iinfo = null;
+
 			// if imageUrl is null, we may consider imageSource is a DataUri.
 			// thus, no need to download and cache anything
 			if (imageUrl == null || !knownImageParts.TryGetValue(imageUrl, out imagePart))
 			{
-				HtmlImageInfo iinfo = null;
 				ImageProvisioningProvider provider = new ImageProvisioningProvider();
 
 				if (imageUrl == null)
@@ -554,39 +558,119 @@ namespace HtmlToOpenXml
 			++drawingObjId;
 			++imageObjId;
 
-			var img = new Drawing(
-				new wp.Inline(
-					new wp.Extent() { Cx = widthInEmus, Cy = heightInEmus },
-					new wp.EffectExtent() { LeftEdge = 19050L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
-					new wp.DocProperties() { Id = drawingObjId, Name = imageSource, Description = String.Empty },
-					new wp.NonVisualGraphicFrameDrawingProperties {
-						GraphicFrameLocks = new a.GraphicFrameLocks() { NoChangeAspect = true }
-					},
-					new a.Graphic(
-						new a.GraphicData(
-							new pic.Picture(
-								new pic.NonVisualPictureProperties {
-									NonVisualDrawingProperties = new pic.NonVisualDrawingProperties() { Id = imageObjId, Name = imageSource, Description = alt },
-									NonVisualPictureDrawingProperties = new pic.NonVisualPictureDrawingProperties(
-										new a.PictureLocks() { NoChangeAspect = true, NoChangeArrowheads = true })
-								},
-								new pic.BlipFill(
-									new a.Blip() { Embed = imagePartId },
-									new a.SourceRectangle(),
-									new a.Stretch(
-										new a.FillRectangle())),
-								new pic.ShapeProperties(
-									new a.Transform2D(
-										new a.Offset() { X = 0L, Y = 0L },
-										new a.Extents() { Cx = widthInEmus, Cy = heightInEmus }),
-									new a.PresetGeometry(
-										new a.AdjustValueList()
-									) { Preset = a.ShapeTypeValues.Rectangle }
-								) { BlackWhiteMode = a.BlackWhiteModeValues.Auto })
-						) { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })
-				) { DistanceFromTop = (UInt32Value) 0U, DistanceFromBottom = (UInt32Value) 0U, DistanceFromLeft = (UInt32Value) 0U, DistanceFromRight = (UInt32Value) 0U }
-			);
+			Drawing img;
 
+			if (!imagePart.Part.ContentType.Equals("image/svg+xml"))
+			{
+				img = new Drawing(
+					new wp.Inline(
+						new wp.Extent() { Cx = widthInEmus, Cy = heightInEmus },
+						new wp.EffectExtent() { LeftEdge = 19050L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+						new wp.DocProperties() { Id = drawingObjId, Name = imageSource, Description = String.Empty },
+						new wp.NonVisualGraphicFrameDrawingProperties
+						{
+							GraphicFrameLocks = new a.GraphicFrameLocks() { NoChangeAspect = true }
+						},
+						new a.Graphic(
+							new a.GraphicData(
+								new pic.Picture(
+									new pic.NonVisualPictureProperties
+									{
+										NonVisualDrawingProperties = new pic.NonVisualDrawingProperties() { Id = imageObjId, Name = imageSource, Description = alt },
+										NonVisualPictureDrawingProperties = new pic.NonVisualPictureDrawingProperties(
+											new a.PictureLocks() { NoChangeAspect = true, NoChangeArrowheads = true })
+									},
+									new pic.BlipFill(
+										new a.Blip() { Embed = imagePartId },
+										new a.SourceRectangle(),
+										new a.Stretch(
+											new a.FillRectangle())),
+									new pic.ShapeProperties(
+										new a.Transform2D(
+											new a.Offset() { X = 0L, Y = 0L },
+											new a.Extents() { Cx = widthInEmus, Cy = heightInEmus }),
+										new a.PresetGeometry(
+											new a.AdjustValueList()
+										)
+										{ Preset = a.ShapeTypeValues.Rectangle }
+									)
+									{ BlackWhiteMode = a.BlackWhiteModeValues.Auto })
+							)
+							{ Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })
+					)
+					{ DistanceFromTop = (UInt32Value)0U, DistanceFromBottom = (UInt32Value)0U, DistanceFromLeft = (UInt32Value)0U, DistanceFromRight = (UInt32Value)0U }
+				);
+			}
+			else
+			{
+				ImagePart ipart = mainPart.AddImagePart(ImagePartType.Png);
+				imagePart = new CachedImagePart() { Part = ipart };
+				imagePart.Width = preferredSize.Width;
+				imagePart.Height = preferredSize.Height;
+
+				using (Stream outputStream = ipart.GetStream(FileMode.Create))
+				{
+					//creating placeholder image for attribute "embed" of tag a:blip
+					byte[] whiteImg = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEWnqKorkAooAAAACklEQVR4nGNiAAAABgADNjd8qAAAAABJRU5ErkJggg==");
+					outputStream.Write(whiteImg, 0, whiteImg.Length);
+					outputStream.Seek(0L, SeekOrigin.Begin);
+				}
+
+				String palceholderImagePartId = mainPart.GetIdOfPart(imagePart.Part);
+
+				++drawingObjId;
+				++imageObjId;
+
+				img = new Drawing(
+					new wp.Inline(
+						new wp.Extent() { Cx = widthInEmus, Cy = heightInEmus },
+						new wp.EffectExtent() { LeftEdge = 19050L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+						new wp.DocProperties() { Id = drawingObjId, Name = imageSource, Description = String.Empty },
+						new wp.NonVisualGraphicFrameDrawingProperties
+						{
+							GraphicFrameLocks = new a.GraphicFrameLocks() { NoChangeAspect = true }
+						},
+						new a.Graphic(
+							new a.GraphicData(
+								new pic.Picture(
+									new pic.NonVisualPictureProperties
+									{
+										NonVisualDrawingProperties = new pic.NonVisualDrawingProperties() { Id = imageObjId, Name = imageSource, Description = alt },
+										NonVisualPictureDrawingProperties = new pic.NonVisualPictureDrawingProperties(
+											new a.PictureLocks()
+										)
+									},
+									new pic.BlipFill(
+										new a.Blip(
+											new a.ExtensionList(
+												new a.Extension(
+													new a14.UseLocalDpi() { Val = false }
+												) { Uri = "{28A0092B-C50C-407E-A947-70E740481C1C}" },
+												new a.Extension(
+													new asvg.SvgBlip() { Embed = imagePartId }
+												) { Uri = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}" }
+											)
+										) { Embed = palceholderImagePartId, CompressionState = a.BlipCompressionValues.Print },
+										new a.SourceRectangle(),
+										new a.Stretch(
+											new a.FillRectangle())),
+									new pic.ShapeProperties(
+										new a.Transform2D(
+											new a.Offset() { X = 0L, Y = 0L },
+											new a.Extents() { Cx = widthInEmus, Cy = heightInEmus }),
+										new a.PresetGeometry(
+											new a.AdjustValueList()
+										)
+										{ Preset = a.ShapeTypeValues.Rectangle }
+									)
+									{ BlackWhiteMode = a.BlackWhiteModeValues.Auto })
+							)
+							{ Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })
+					)
+					{ DistanceFromTop = (UInt32Value)0U, DistanceFromBottom = (UInt32Value)0U, DistanceFromLeft = (UInt32Value)0U, DistanceFromRight = (UInt32Value)0U }
+				);
+			}
+			
 			return img;
 		}
 

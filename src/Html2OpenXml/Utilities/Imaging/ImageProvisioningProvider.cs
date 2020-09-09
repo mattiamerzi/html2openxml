@@ -160,7 +160,8 @@ namespace HtmlToOpenXml
 			{ "image/ico", ImagePartType.Icon },
 			{ "text/ico", ImagePartType.Icon },
 			{ "text/application-ico", ImagePartType.Icon },
-			{ "image/bmp", ImagePartType.Bmp }
+			{ "image/bmp", ImagePartType.Bmp },
+			{ "image/svg+xml", ImagePartType.Svg }
 		};
 
 		/// <summary>
